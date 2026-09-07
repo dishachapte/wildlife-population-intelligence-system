@@ -17,13 +17,13 @@ async def init_db():
 
     # MongoDB
     client = AsyncIOMotorClient(settings.MONGO_URI)
-    database = client[settings.MONGO_DB_NAME]
 
     await init_beanie(
-        database=database,
+        database=client[settings.MONGO_DB_NAME],
         document_models=[MonitoringSite],
     )
 
 
 async def close_db():
     await Tortoise.close_connections()
+
