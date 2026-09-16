@@ -20,24 +20,40 @@ SPECIES_MODEL_PATH = BACKEND_DIR / "yolov8n.pt"
 # LOAD SPECIES MODEL
 # ============================================================
 
-try:
+model = None
 
-    model = YOLO(
-        str(SPECIES_MODEL_PATH)
-    )
 
-    print(
-        f"✅ Species model loaded: "
-        f"{SPECIES_MODEL_PATH}"
-    )
+def load_species_model():
 
-except Exception as e:
+    global model
 
-    model = None
+    if model is not None:
+        return model
 
-    print(
-        f"❌ Failed to load species model: {e}"
-    )
+    try:
+
+        print("🦁 Loading species YOLO model...")
+
+        model = YOLO(
+            str(SPECIES_MODEL_PATH)
+        )
+
+        print(
+            f"✅ Species model loaded: "
+            f"{SPECIES_MODEL_PATH}"
+        )
+
+        return model
+
+    except Exception as e:
+
+        print(
+            f"❌ Failed to load species model: {e}"
+        )
+
+        model = None
+
+        return None
 
 
 # ============================================================
@@ -140,12 +156,9 @@ def detect_objects(
     # CHECK SPECIES MODEL
     # ========================================================
 
+    model = load_species_model()
     if model is None:
-
-        raise RuntimeError(
-            "Species YOLO model is not loaded."
-        )
-
+        raise RuntimeError("Species YOLO model could not be loaded.")
 
     # ========================================================
     # CHECK IMAGE EXISTS

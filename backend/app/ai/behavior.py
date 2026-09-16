@@ -1,4 +1,5 @@
 from pathlib import Path
+from pyexpat import model
 
 from ultralytics import YOLO
 
@@ -18,24 +19,39 @@ BEHAVIOR_MODEL_PATH = (
 # LOAD TRAINED BEHAVIOR MODEL
 # ============================================================
 
-try:
+behavior_model = None
 
-    behavior_model = YOLO(
-        str(BEHAVIOR_MODEL_PATH)
-    )
 
-    print(
-        f"✅ Behavior model loaded: "
-        f"{BEHAVIOR_MODEL_PATH}"
-    )
+def load_behavior_model():
 
-except Exception as e:
+    global behavior_model
 
-    behavior_model = None
+    if behavior_model is not None:
+        return behavior_model
 
-    print(
-        f"❌ Failed to load behavior model: {e}"
-    )
+    try:
+        print("🧠 Loading behavior model...")
+
+        behavior_model = YOLO(
+            str(BEHAVIOR_MODEL_PATH)
+        )
+
+        print(
+            f"✅ Behavior model loaded: "
+            f"{BEHAVIOR_MODEL_PATH}"
+        )
+
+        return behavior_model
+
+    except Exception as e:
+
+        print(
+            f"❌ Failed to load behavior model: {e}"
+        )
+
+        behavior_model = None
+
+        return None
 
 
 # ============================================================
@@ -99,8 +115,9 @@ def normalize_behavior(
 # ============================================================
 
 def detect_behavior(image):
+    model = load_behavior_model()
 
-    if behavior_model is None:
+    if model is None:
 
         print("❌ Behavior model is not loaded")
 
@@ -111,7 +128,7 @@ def detect_behavior(image):
 
     try:
 
-        results = behavior_model.predict(
+        results = model.predict(
             source=image,
             verbose=False,
             conf=0.05
