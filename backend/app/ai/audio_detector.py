@@ -1,46 +1,69 @@
-import numpy as np
-import librosa
 import csv
-import tensorflow as tf
-import tensorflow_hub as hub
+
+import numpy as np
 
 
 # ============================================================
-# GLOBAL VARIABLES
+# LAZY-LOADED YAMNET MODEL
 # ============================================================
 
 model = None
+
 labels = []
-model_loaded = False
 
 
 # ============================================================
-# LOAD YAMNET MODEL ONLY WHEN NEEDED
+# LOAD YAMNET
 # ============================================================
 
 def load_yamnet():
+    """
+    Load TensorFlow + TensorFlow Hub + YAMNet only when
+    audio analysis is actually requested.
+
+    This prevents TensorFlow from consuming large amounts
+    of memory during FastAPI startup.
+    """
 
     global model
     global labels
-    global model_loaded
 
     # Already loaded
-    if model_loaded:
-        return model is not None
+    if model is not None:
 
-    print("🔊 Loading YAMNet audio model...")
+        return model
+
 
     try:
+
+        print(
+            "🔊 Loading YAMNet audio model..."
+        )
+
+
+        # IMPORTANT:
+        # These imports MUST stay inside this function.
+        import tensorflow as tf
+        import tensorflow_hub as hub
+
+
+        # ----------------------------------------------------
+        # Load YAMNet
+        # ----------------------------------------------------
 
         model = hub.load(
             "https://tfhub.dev/google/yamnet/1"
         )
 
-        print("✅ YAMNet audio model loaded successfully")
 
-        # ====================================================
-        # LOAD YAMNET CLASS LABELS
-        # ====================================================
+        print(
+            "✅ YAMNet audio model loaded successfully"
+        )
+
+
+        # ----------------------------------------------------
+        # Load class labels
+        # ----------------------------------------------------
 
         class_map_path = (
             model
@@ -49,175 +72,169 @@ def load_yamnet():
             .decode("utf-8")
         )
 
-        with tf.io.gfile.GFile(class_map_path) as csv_file:
 
-            reader = csv.DictReader(csv_file)
+        with tf.io.gfile.GFile(
+            class_map_path
+        ) as csv_file:
+
+            reader = csv.DictReader(
+                csv_file
+            )
 
             labels = [
                 row["display_name"]
                 for row in reader
             ]
 
+
         print(
-            f"✅ Loaded {len(labels)} audio labels"
+            f"✅ Loaded "
+            f"{len(labels)} audio labels"
         )
 
-        model_loaded = True
 
-        return True
+        return model
+
 
     except Exception as e:
 
         print(
-            f"⚠️ YAMNet audio model could not be loaded: {e}"
-        )
-
-        print(
-            "⚠️ Audio recognition is temporarily unavailable."
+            f"❌ Failed to load YAMNet: {e}"
         )
 
         model = None
-        labels = []
-        model_loaded = True
 
-        return False
+        labels = []
+
+        return None
 
 
 # ============================================================
 # AUDIO DETECTION
 # ============================================================
 
-def detect_audio(audio_path: str):
+def detect_audio(
+    audio_path: str
+):
 
     """
     Analyze an audio file using YAMNet.
 
-    Returns the top 5 detected audio events.
+    Returns the top 5 detected audio classes.
     """
 
-    # ========================================================
-    # LOAD MODEL ONLY WHEN AUDIO IS ACTUALLY USED
-    # ========================================================
 
-    if not load_yamnet():
+    # --------------------------------------------------------
+    # Load YAMNet
+    # --------------------------------------------------------
 
-        return [
-            {
-                "label": "Audio model unavailable",
-                "confidence": 0.0
-            }
-        ]
+    yamnet_model = load_yamnet()
 
-    # ========================================================
-    # CHECK LABELS
-    # ========================================================
 
-    if not labels:
+    if (
+        yamnet_model is None
+        or not labels
+    ):
 
-        return [
-            {
-                "label": "Audio labels unavailable",
-                "confidence": 0.0
-            }
-        ]
+        raise RuntimeError(
+            "YAMNet model is not available"
+        )
 
-    # ========================================================
-    # LOAD AUDIO
-    # ========================================================
+
+    # --------------------------------------------------------
+    # Import heavy audio libraries only when needed
+    # --------------------------------------------------------
+
+    import librosa
+    import tensorflow as tf
+
+
+    # --------------------------------------------------------
+    # Load audio
+    # --------------------------------------------------------
 
     try:
 
-        waveform, sr = librosa.load(
-            audio_path,
-            sr=16000,
-            mono=True
+        waveform, sample_rate = (
+            librosa.load(
+                audio_path,
+                sr=16000,
+                mono=True
+            )
         )
 
     except Exception as e:
 
-        print(
-            f"❌ Failed to load audio: {e}"
+        raise RuntimeError(
+            f"Could not load audio file: {e}"
         )
 
-        return [
-            {
-                "label": "Audio loading failed",
-                "confidence": 0.0
-            }
-        ]
 
-    # ========================================================
-    # CHECK AUDIO
-    # ========================================================
+    # --------------------------------------------------------
+    # Convert waveform
+    # --------------------------------------------------------
 
-    if waveform is None or len(waveform) == 0:
+    waveform = waveform.astype(
+        np.float32
+    )
 
-        return [
-            {
-                "label": "No audio detected",
-                "confidence": 0.0
-            }
-        ]
 
-    # ========================================================
-    # RUN YAMNET
-    # ========================================================
+    # --------------------------------------------------------
+    # Run YAMNet
+    # --------------------------------------------------------
 
     try:
 
-        scores, embeddings, spectrogram = model(
-            waveform
+        scores, embeddings, spectrogram = (
+            yamnet_model(
+                waveform
+            )
         )
 
     except Exception as e:
 
-        print(
-            f"❌ YAMNet prediction failed: {e}"
+        raise RuntimeError(
+            f"YAMNet analysis failed: {e}"
         )
 
-        return [
-            {
-                "label": "Audio analysis failed",
-                "confidence": 0.0
-            }
-        ]
 
-    # ========================================================
-    # AVERAGE PREDICTION SCORES
-    # ========================================================
+    # --------------------------------------------------------
+    # Average scores across time
+    # --------------------------------------------------------
 
     mean_scores = (
         tf.reduce_mean(
             scores,
             axis=0
         )
-        .numpy()
     )
 
-    # ========================================================
-    # GET TOP 5 PREDICTIONS
-    # ========================================================
 
-    top5 = (
-        np.argsort(
-            mean_scores
-        )[-5:][::-1]
-    )
+    # --------------------------------------------------------
+    # Get top 5 classes
+    # --------------------------------------------------------
 
-    predictions = []
+    top5 = tf.argsort(
+        mean_scores,
+        direction="DESCENDING"
+    )[:5]
 
-    # ========================================================
-    # CREATE RESULTS
-    # ========================================================
+
+    # --------------------------------------------------------
+    # Build result
+    # --------------------------------------------------------
+
+    results = []
+
 
     for index in top5:
 
-        index = int(index)
+        index = int(
+            index.numpy()
+        )
 
-        if index >= len(labels):
-            continue
 
-        predictions.append({
+        results.append({
 
             "label":
                 labels[index],
@@ -225,11 +242,18 @@ def detect_audio(audio_path: str):
             "confidence":
                 round(
                     float(
-                        mean_scores[index]
+                        mean_scores[
+                            index
+                        ].numpy()
                     ),
                     4
                 )
 
         })
 
-    return predictions
+
+    # --------------------------------------------------------
+    # Return results
+    # --------------------------------------------------------
+
+    return results

@@ -1,7 +1,4 @@
 from pathlib import Path
-from pyexpat import model
-
-from ultralytics import YOLO
 
 
 # ============================================================
@@ -16,21 +13,33 @@ BEHAVIOR_MODEL_PATH = (
 
 
 # ============================================================
-# LOAD TRAINED BEHAVIOR MODEL
+# LAZY-LOADED BEHAVIOR MODEL
 # ============================================================
 
 behavior_model = None
 
 
 def load_behavior_model():
+    """
+    Load the behavior YOLO model only when it is actually needed.
+
+    This prevents the model from consuming Render memory
+    during FastAPI startup.
+    """
 
     global behavior_model
 
+    # Already loaded
     if behavior_model is not None:
         return behavior_model
 
     try:
         print("🧠 Loading behavior model...")
+
+        # IMPORTANT:
+        # Heavy Ultralytics import happens only when this
+        # function is called.
+        from ultralytics import YOLO
 
         behavior_model = YOLO(
             str(BEHAVIOR_MODEL_PATH)
@@ -95,18 +104,13 @@ def normalize_behavior(
 
         return "Unknown"
 
-
     behavior_name = str(
         behavior_name
     ).strip()
 
-
     return BEHAVIOR_CLASSES.get(
-
         behavior_name,
-
         behavior_name.title()
-
     )
 
 
@@ -115,16 +119,28 @@ def normalize_behavior(
 # ============================================================
 
 def detect_behavior(image):
+
+    # --------------------------------------------------------
+    # LOAD MODEL ONLY WHEN NEEDED
+    # --------------------------------------------------------
+
     model = load_behavior_model()
 
     if model is None:
 
-        print("❌ Behavior model is not loaded")
+        print(
+            "❌ Behavior model is not loaded"
+        )
 
         return {
             "behavior": "Unknown",
             "confidence": 0.0
         }
+
+
+    # --------------------------------------------------------
+    # RUN MODEL
+    # --------------------------------------------------------
 
     try:
 
@@ -145,6 +161,11 @@ def detect_behavior(image):
             "confidence": 0.0
         }
 
+
+    # --------------------------------------------------------
+    # CHECK RESULTS
+    # --------------------------------------------------------
+
     if not results:
 
         print(
@@ -156,9 +177,18 @@ def detect_behavior(image):
             "confidence": 0.0
         }
 
+
     result = results[0]
 
-    if result.boxes is None or len(result.boxes) == 0:
+
+    # --------------------------------------------------------
+    # CHECK BOXES
+    # --------------------------------------------------------
+
+    if (
+        result.boxes is None
+        or len(result.boxes) == 0
+    ):
 
         print(
             "⚠️ No behavior detected "
@@ -170,15 +200,25 @@ def detect_behavior(image):
             "confidence": 0.0
         }
 
+
     print(
         f"🔎 Behavior model found "
         f"{len(result.boxes)} behavior boxes"
     )
 
+
+    # --------------------------------------------------------
+    # FIND HIGHEST CONFIDENCE BEHAVIOR
+    # --------------------------------------------------------
+
     best_index = 0
+
     best_confidence = 0.0
 
-    for index, box in enumerate(result.boxes):
+
+    for index, box in enumerate(
+        result.boxes
+    ):
 
         confidence = float(
             box.conf[0]
@@ -188,7 +228,7 @@ def detect_behavior(image):
             box.cls[0]
         )
 
-        class_name = behavior_model.names[
+        class_name = model.names[
             class_id
         ]
 
@@ -198,33 +238,52 @@ def detect_behavior(image):
             f"confidence={confidence:.2f}"
         )
 
+
         if confidence > best_confidence:
 
             best_confidence = confidence
 
             best_index = index
 
+
+    # --------------------------------------------------------
+    # GET BEST BOX
+    # --------------------------------------------------------
+
     best_box = result.boxes[
         best_index
     ]
+
 
     class_id = int(
         best_box.cls[0]
     )
 
-    behavior_name = behavior_model.names[
+
+    behavior_name = model.names[
         class_id
     ]
+
+
+    # --------------------------------------------------------
+    # NORMALIZE NAME
+    # --------------------------------------------------------
 
     behavior_name = normalize_behavior(
         behavior_name
     )
+
 
     print(
         f"✅ Selected behavior: "
         f"{behavior_name} "
         f"confidence={best_confidence:.2f}"
     )
+
+
+    # --------------------------------------------------------
+    # RETURN RESULT
+    # --------------------------------------------------------
 
     return {
 

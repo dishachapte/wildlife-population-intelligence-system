@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import cv2
-from ultralytics import YOLO
 
 from app.ai.behavior import detect_behavior
 
@@ -11,28 +10,45 @@ from app.ai.behavior import detect_behavior
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
+
 BACKEND_DIR = BASE_DIR.parent.parent
 
-SPECIES_MODEL_PATH = BACKEND_DIR / "yolov8n.pt"
+SPECIES_MODEL_PATH = (
+    BACKEND_DIR / "yolov8n.pt"
+)
 
 
 # ============================================================
-# LOAD SPECIES MODEL
+# LAZY-LOADED SPECIES MODEL
 # ============================================================
 
 model = None
 
 
 def load_species_model():
+    """
+    Load YOLO species model only when image analysis
+    is actually requested.
+
+    This prevents the heavy Ultralytics/Torch stack
+    from loading during FastAPI startup.
+    """
 
     global model
 
+    # Already loaded
     if model is not None:
         return model
 
     try:
 
-        print("🦁 Loading species YOLO model...")
+        print(
+            "🦌 Loading species detection model..."
+        )
+
+        # IMPORTANT:
+        # Heavy Ultralytics import happens only here.
+        from ultralytics import YOLO
 
         model = YOLO(
             str(SPECIES_MODEL_PATH)
@@ -110,11 +126,8 @@ def get_conservation_status(
     )
 
     return CONSERVATION_STATUS.get(
-
         species,
-
         "Not Evaluated"
-
     )
 
 
@@ -127,7 +140,7 @@ def detect_objects(
 ):
 
     """
-    Detects multiple animals in an image.
+    Detect multiple animals in an image.
 
     For each detected animal:
 
@@ -153,12 +166,17 @@ def detect_objects(
 
 
     # ========================================================
-    # CHECK SPECIES MODEL
+    # LOAD SPECIES MODEL ONLY WHEN NEEDED
     # ========================================================
 
-    model = load_species_model()
-    if model is None:
-        raise RuntimeError("Species YOLO model could not be loaded.")
+    species_model = load_species_model()
+
+    if species_model is None:
+
+        raise RuntimeError(
+            "Species YOLO model is not loaded."
+        )
+
 
     # ========================================================
     # CHECK IMAGE EXISTS
@@ -172,10 +190,8 @@ def detect_objects(
     if not image_file.exists():
 
         raise FileNotFoundError(
-
             f"Image file does not exist: "
             f"{image_path}"
-
         )
 
 
@@ -191,18 +207,14 @@ def detect_objects(
     if image is None:
 
         raise ValueError(
-
             f"OpenCV could not read image: "
             f"{image_path}"
-
         )
 
 
     print(
-
         f"✅ Image loaded: "
         f"{image.shape}"
-
     )
 
 
@@ -215,14 +227,10 @@ def detect_objects(
     )
 
 
-    results = model.predict(
-
+    results = species_model.predict(
         source=image,
-
         verbose=False,
-
         conf=0.10,
-
     )
 
 
@@ -258,10 +266,8 @@ def detect_objects(
 
 
         print(
-
             f"📦 Detected boxes: "
             f"{len(result.boxes)}"
-
         )
 
 
@@ -293,26 +299,22 @@ def detect_objects(
             # SPECIES NAME
             # =================================================
 
-            species = model.names[
+            species = species_model.names[
                 cls
             ]
 
 
             species = (
-
                 species
                 .lower()
                 .strip()
-
             )
 
 
             print(
-
                 f"🐘 Animal detected: "
                 f"{species} "
                 f"({confidence:.2f})"
-
             )
 
 
@@ -321,12 +323,10 @@ def detect_objects(
             # =================================================
 
             x1, y1, x2, y2 = (
-
                 box.xyxy[0]
                 .cpu()
                 .numpy()
                 .astype(int)
-
             )
 
 
@@ -335,50 +335,38 @@ def detect_objects(
             # =================================================
 
             x1 = max(
-
                 0,
-
                 min(
                     x1,
                     width - 1
                 )
-
             )
 
 
             y1 = max(
-
                 0,
-
                 min(
                     y1,
                     height - 1
                 )
-
             )
 
 
             x2 = max(
-
                 0,
-
                 min(
                     x2,
                     width
                 )
-
             )
 
 
             y2 = max(
-
                 0,
-
                 min(
                     y2,
                     height
                 )
-
             )
 
 
@@ -402,13 +390,9 @@ def detect_objects(
             # =================================================
 
             if (
-
                 x2 > x1
-
                 and
-
                 y2 > y1
-
             ):
 
                 # =============================================
@@ -419,28 +403,25 @@ def detect_objects(
                     x2 - x1
                 )
 
+
                 box_height = (
                     y2 - y1
                 )
 
 
                 # =============================================
-                # ADD 25% PADDING
+                # ADD PADDING
                 # =============================================
 
                 padding_x = int(
-
                     box_width
                     * 0.50
-
                 )
 
 
                 padding_y = int(
-
                     box_height
                     * 0.50
-
                 )
 
 
@@ -449,38 +430,26 @@ def detect_objects(
                 # =============================================
 
                 crop_x1 = max(
-
                     0,
-
                     x1 - padding_x
-
                 )
 
 
                 crop_y1 = max(
-
                     0,
-
                     y1 - padding_y
-
                 )
 
 
                 crop_x2 = min(
-
                     width,
-
                     x2 + padding_x
-
                 )
 
 
                 crop_y2 = min(
-
                     height,
-
                     y2 + padding_y
-
                 )
 
 
@@ -489,11 +458,8 @@ def detect_objects(
                 # =============================================
 
                 animal_crop = image[
-
                     crop_y1:crop_y2,
-
                     crop_x1:crop_x2
-
                 ]
 
 
@@ -502,53 +468,50 @@ def detect_objects(
                 # =============================================
 
                 if (
-
                     animal_crop is not None
-
                     and
-
                     animal_crop.size > 0
-
                 ):
 
                     print(
-
                         f"🧠 Running behavior "
                         f"analysis for {species}..."
-
                     )
 
 
-                    # =========================================
-                    # RUN TRAINED BEHAVIOR MODEL
-                    # =========================================
                     print(
                         f"🖼️ Behavior crop for {species}: "
                         f"shape={animal_crop.shape}"
                     )
+
+
+                    # =========================================
+                    # SAVE DEBUG CROP
+                    # =========================================
+
                     cv2.imwrite(
                         f"debug_{species}_{x1}_{y1}.jpg",
                         animal_crop
                     )
+
+
+                    # =========================================
+                    # RUN BEHAVIOR MODEL
+                    # =========================================
+
                     behavior_result = (
-
                         detect_behavior(
-
                             animal_crop
-
                         )
-
                     )
 
 
                     print(
-
                         f"➡️ Behavior: "
                         f"{behavior_result['behavior']} "
                         f"("
                         f"{behavior_result['confidence']:.2f}"
                         f")"
-
                     )
 
 
@@ -557,13 +520,9 @@ def detect_objects(
             # =================================================
 
             conservation_status = (
-
                 get_conservation_status(
-
                     species
-
                 )
-
             )
 
 
@@ -578,25 +537,18 @@ def detect_objects(
 
                 "confidence":
                     round(
-
                         confidence,
-
                         2
-
                     ),
 
                 "behavior":
                     behavior_result[
-
                         "behavior"
-
                     ],
 
                 "behavior_confidence":
                     behavior_result[
-
                         "confidence"
-
                     ],
 
                 "conservation_status":
@@ -626,11 +578,9 @@ def detect_objects(
     # ========================================================
 
     print(
-
         f"✅ AI analysis complete. "
         f"Animals detected: "
         f"{len(detections)}"
-
     )
 
 

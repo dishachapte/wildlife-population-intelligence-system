@@ -1,34 +1,46 @@
-from xml.parsers.expat import model
+# ============================================================
+# LAZY-LOADED BIRDNET ANALYZER
+# ============================================================
 
-from birdnetlib import Recording
-from birdnetlib.analyzer import Analyzer
-
-
-# Load BirdNET model
 analyzer = None
 
 
 def load_birdnet():
+    """
+    Load BirdNET only when bird detection is requested.
+
+    This prevents BirdNET from consuming memory during
+    FastAPI startup.
+    """
 
     global analyzer
 
+    # Already loaded
     if analyzer is not None:
         return analyzer
 
     try:
 
-        print("🐦 Loading BirdNET model...")
+        print(
+            "🐦 Loading BirdNET model..."
+        )
+
+        # IMPORTANT:
+        # Heavy BirdNET imports happen only when needed.
+        from birdnetlib.analyzer import Analyzer
 
         analyzer = Analyzer()
 
-        print("✅ BirdNET model loaded")
+        print(
+            "✅ BirdNET model loaded successfully"
+        )
 
         return analyzer
 
     except Exception as e:
 
         print(
-            f"❌ BirdNET model could not be loaded: {e}"
+            f"❌ Failed to load BirdNET: {e}"
         )
 
         analyzer = None
@@ -36,31 +48,93 @@ def load_birdnet():
         return None
 
 
-def detect_birds(audio_path: str):
+# ============================================================
+# BIRD DETECTION
+# ============================================================
 
-    model = load_birdnet()
-    if model is None:
-        return []
+def detect_birds(
+    audio_path: str
+):
+
+    # --------------------------------------------------------
+    # Import Recording only when needed
+    # --------------------------------------------------------
+
+    from birdnetlib import Recording
+
+
+    # --------------------------------------------------------
+    # Load analyzer
+    # --------------------------------------------------------
+
+    birdnet_analyzer = load_birdnet()
+
+
+    if birdnet_analyzer is None:
+
+        raise RuntimeError(
+            "BirdNET model is not available"
+        )
+
+
+    # --------------------------------------------------------
+    # Create recording
+    # --------------------------------------------------------
 
     recording = Recording(
-    model,
-    audio_path,
-    min_conf=0.1,
-)
+        birdnet_analyzer,
+        audio_path,
+        min_conf=0.1,
+    )
+
+
+    # --------------------------------------------------------
+    # Analyze recording
+    # --------------------------------------------------------
 
     recording.analyze()
 
+
+    # --------------------------------------------------------
+    # Store predictions
+    # --------------------------------------------------------
+
     predictions = []
+
+
+    # --------------------------------------------------------
+    # Process detections
+    # --------------------------------------------------------
 
     for detection in recording.detections:
 
         predictions.append({
-            "species": detection["common_name"],
-            "scientific_name": detection["scientific_name"],
-            "confidence": round(
-                float(detection["confidence"]),
-                4
-            ),
+
+            "species":
+                detection[
+                    "common_name"
+                ],
+
+            "scientific_name":
+                detection[
+                    "scientific_name"
+                ],
+
+            "confidence":
+                round(
+                    float(
+                        detection[
+                            "confidence"
+                        ]
+                    ),
+                    4
+                ),
+
         })
+
+
+    # --------------------------------------------------------
+    # Return predictions
+    # --------------------------------------------------------
 
     return predictions
