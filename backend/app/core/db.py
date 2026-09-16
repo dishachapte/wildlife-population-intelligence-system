@@ -17,12 +17,23 @@ async def init_db():
     print("POSTGRES DSN:", settings.POSTGRES_DSN)
     print("=" * 60)
     # PostgreSQL
-    await Tortoise.init(
-        db_url=settings.POSTGRES_DSN,
-        modules={
-            "models": ["app.models.user"]
-        },
-    )
+    postgres_dsn = settings.POSTGRES_DSN
+
+# asyncpg does not accept sslmode/channel_binding as connection arguments
+    if "?" in postgres_dsn:
+        base_url, query = postgres_dsn.split("?", 1)
+        params = [
+        p for p in query.split("&")
+        if not p.startswith("sslmode=")
+        and not p.startswith("channel_binding=")
+    ]
+        postgres_dsn = base_url + (("?" + "&".join(params)) if params else "")
+        await Tortoise.init(
+            db_url=postgres_dsn,
+            modules={
+                "models": ["app.models.user"]
+                },
+                )
 
     print("Loaded apps:", Tortoise.apps)
 
